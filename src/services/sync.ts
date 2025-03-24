@@ -72,8 +72,8 @@ class SyncManager {
         return this.getStats();
       }
       
-      // Procesar en lotes más pequeños
-      const batchSize = 3;
+      // Procesar de a un correo a la vez para minimizar uso de memoria
+      const batchSize = 1;
       for (let i = 0; i < newEmailIds.length; i += batchSize) {
         const batch = newEmailIds.slice(i, i + batchSize);
         

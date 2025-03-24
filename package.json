@@ -5,10 +5,10 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node --max-old-space-size=4096 dist/index.js",
+    "start": "node --max-old-space-size=8192 dist/index.js",
     "dev": "ts-node-dev --respawn src/index.ts",
-    "sync": "node --max-old-space-size=4096 -r ts-node/register src/scripts/syncEmails.ts",
-    "gc-sync": "node --max-old-space-size=4096 --expose-gc -r ts-node/register src/scripts/syncEmails.ts"
+    "sync": "node --max-old-space-size=8192 -r ts-node/register src/scripts/syncEmails.ts",
+    "gc-sync": "node --max-old-space-size=8192 --expose-gc -r ts-node/register src/scripts/syncEmails.ts"
   },
   "dependencies": {
     "axios": "^1.6.2",

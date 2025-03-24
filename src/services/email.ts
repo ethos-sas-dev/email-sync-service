@@ -125,8 +125,8 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
   const detailedEmails: DetailedEmail[] = [];
   
   try {
-    // Procesar en lotes pequeños para no sobrecargar el servidor IMAP
-    const batchSize = 3;
+    // Procesar de a un correo a la vez para minimizar el uso de memoria
+    const batchSize = 1;
     for (let i = 0; i < emailIds.length; i += batchSize) {
       const batchIds = emailIds.slice(i, i + batchSize);
       
@@ -297,7 +297,14 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
               }));
           }
           
-          // Agregar correo detallado con fecha
+          // Limitar el tamaño del contenido para evitar problemas de memoria
+          let optimizedContent = fullContent;
+          if (fullContent && fullContent.length > 50000) {
+            console.log(`Correo ${emailId} tiene contenido grande (${fullContent.length} caracteres), recortando a 50K...`);
+            optimizedContent = fullContent.substring(0, 50000) + "... (contenido truncado para ahorro de memoria)";
+          }
+          
+          // Agregar correo detallado con fecha y contenido optimizado
           detailedEmails.push({
             emailId,
             from: cleanEmailString(fromAddress),
@@ -305,7 +312,7 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
             subject: cleanEmailString(subject),
             receivedDate,
             preview,
-            fullContent,
+            fullContent: optimizedContent,
             attachments
           });
           
