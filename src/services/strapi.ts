@@ -164,9 +164,13 @@ export async function syncEmailWithStrapi(
         subject: escapeForGraphQL(email.subject || ''),
         receivedDate: email.receivedDate || new Date().toISOString(),
         emailStatus: strapiStatus,
+        // Limitar el tamaño del contenido para evitar problemas de memoria
+        // Si el contenido es demasiado grande, lo recortamos a 100K caracteres
         fullContent: escapeForGraphQL(
           typeof email.fullContent === 'string' && email.fullContent.trim() 
-            ? email.fullContent.trim() 
+            ? email.fullContent.length > 100000 
+              ? email.fullContent.trim().substring(0, 100000) + '... (contenido truncado)'
+              : email.fullContent.trim() 
             : email.preview || '(Contenido no disponible)'
         ),
         lastResponseBy: null

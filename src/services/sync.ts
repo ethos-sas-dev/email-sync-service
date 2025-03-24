@@ -72,8 +72,8 @@ class SyncManager {
         return this.getStats();
       }
       
-      // Procesar en lotes pequeños
-      const batchSize = 10;
+      // Procesar en lotes más pequeños
+      const batchSize = 3;
       for (let i = 0; i < newEmailIds.length; i += batchSize) {
         const batch = newEmailIds.slice(i, i + batchSize);
         
@@ -115,6 +115,15 @@ class SyncManager {
           
           // Pequeña pausa para no sobrecargar servidores
           await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Pausa más larga entre lotes para liberar memoria
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Forzar recolección de basura después de cada lote
+          if (global.gc) {
+            console.log("Ejecutando recolección de basura manual");
+            global.gc();
+          }
         } catch (batchError) {
           console.error(`Error al procesar lote de correos:`, batchError);
           this.stats.errors += batch.length;

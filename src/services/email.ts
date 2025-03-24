@@ -125,8 +125,8 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
   const detailedEmails: DetailedEmail[] = [];
   
   try {
-    // Procesar en lotes pequeños para mejor rendimiento
-    const batchSize = 5; // Reducir a 5 para manejar mejor el cuerpo completo
+    // Procesar en lotes pequeños para no sobrecargar el servidor IMAP
+    const batchSize = 3;
     for (let i = 0; i < emailIds.length; i += batchSize) {
       const batchIds = emailIds.slice(i, i + batchSize);
       
