@@ -1,0 +1,26 @@
+# Dependencias
+node_modules
+package-lock.json
+yarn.lock
+
+# Archivos compilados
+dist
+
+# Archivos de entorno
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Misc
+.DS_Store
+.vscode
+coverage 
