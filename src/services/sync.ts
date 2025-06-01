@@ -73,7 +73,7 @@ class SyncManager {
       }
       
       // Procesar de a un correo a la vez para minimizar uso de memoria
-      const batchSize = 1;
+      const batchSize = 5;
       for (let i = 0; i < newEmailIds.length; i += batchSize) {
         const batch = newEmailIds.slice(i, i + batchSize);
         

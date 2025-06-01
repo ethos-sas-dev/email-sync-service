@@ -102,6 +102,10 @@ export async function fetchEmailIds(): Promise<string[]> {
 /**
  * Obtiene información detallada de correos por sus IDs (incluyendo cuerpo completo)
  */
+/**
+ * Obtiene información detallada de correos por sus IDs (incluyendo cuerpo completo)
+ * VERSIÓN OPTIMIZADA - No carga todos los correos en memoria
+ */
 export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedEmail[]> {
   if (emailIds.length === 0) return [];
   
@@ -125,31 +129,28 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
   const detailedEmails: DetailedEmail[] = [];
   
   try {
-    // Procesar de a un correo a la vez para minimizar el uso de memoria
-    const batchSize = 1;
-    for (let i = 0; i < emailIds.length; i += batchSize) {
-      const batchIds = emailIds.slice(i, i + batchSize);
-      
-      // Criterio de búsqueda para obtener todos los mensajes
-      const searchCriteria = ['ALL'];
-      const fetchOptions = {
-        bodies: ['HEADER', ''], // Obtener tanto encabezado como cuerpo completo
-        struct: true
-      };
-      
-      // Obtener mensajes
-      const messages = await connection.search(searchCriteria, fetchOptions);
-      
-      // Filtrar solo los mensajes que necesitamos
-      for (const emailId of batchIds) {
-        // Buscar el mensaje con este ID
-        const message = messages.find((msg: Message) => String(msg.attributes.uid) === String(emailId));
+    // Procesar cada correo individualmente para minimizar memoria
+    for (const emailId of emailIds) {
+      try {
+        console.log(`Procesando correo individual: ${emailId}`);
         
-        if (!message) {
+        // ✅ OPTIMIZACIÓN: Buscar solo el correo específico por UID
+        const searchCriteria = [['UID', emailId]];
+        const fetchOptions = {
+          bodies: ['HEADER', ''], // Obtener tanto encabezado como cuerpo completo
+          struct: true
+        };
+        
+        // Obtener solo este mensaje específico
+        const messages = await connection.search(searchCriteria, fetchOptions);
+        
+        if (!messages || messages.length === 0) {
           console.log(`No se encontró el correo con ID ${emailId}`);
           detailedEmails.push({ emailId });
           continue;
         }
+        
+        const message = messages[0]; // Solo hay uno porque buscamos por UID específico
         
         // Obtener la parte del encabezado
         const headerPart = message.parts.find((part: any) => part.which === 'HEADER');
@@ -168,7 +169,6 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
         }
         
         // Parsear encabezados con manejo de errores
-        // Definir interfaz para los encabezados parseados
         interface ParsedHeader {
           from?: string[];
           to?: string[];
@@ -179,16 +179,13 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
         
         let parsedHeader: ParsedHeader = {};
         try {
-          // Asegurarnos que headerPart.body es un string antes de parsearlo
           const headerBody = typeof headerPart.body === 'string' 
             ? headerPart.body 
             : JSON.stringify(headerPart.body);
           
-          // Usar nuestra propia función parseHeader
           parsedHeader = parseHeader(headerBody);
         } catch (headerError) {
           console.error(`Error al parsear encabezado del correo ${emailId}:`, headerError);
-          // Continuar con un objeto vacío
           parsedHeader = {};
         }
         
@@ -197,46 +194,33 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
           const parsed = await simpleParser(fullPart.body);
           
           // Extraer información segura del correo
-          let fromAddress = '';
-          let toAddress = '';
-          
-          // Usar una función auxiliar para extraer la dirección
           const getEmailAddress = (addressObj: any): string => {
             if (!addressObj) return '';
             
             try {
-              // Intentar diferentes formatos de direcciones de correo
               if (typeof addressObj === 'string') return addressObj;
-              
-              // Si tiene texto, usarlo directamente
               if (addressObj.text) return addressObj.text;
-              
-              // Si tiene dirección, usarla
               if (addressObj.address) return addressObj.address;
               
-              // Si tiene un array value, obtener la primera dirección
               if (addressObj.value && Array.isArray(addressObj.value) && addressObj.value.length > 0) {
                 return addressObj.value[0].address || '';
               }
               
-              // Si es un array, tomar el primer elemento
               if (Array.isArray(addressObj) && addressObj.length > 0) {
                 const first = addressObj[0];
                 return typeof first === 'string' ? first : 
                        first.address || first.text || '';
               }
               
-              // Último recurso: convertir a string
               return String(addressObj);
             } catch (e) {
-              // Si hay error, devolver cadena vacía
               return '';
             }
           };
           
           // Extraer direcciones
-          fromAddress = getEmailAddress(parsed.from);
-          toAddress = getEmailAddress(parsed.to);
+          const fromAddress = getEmailAddress(parsed.from);
+          const toAddress = getEmailAddress(parsed.to);
           
           // Extraer asunto
           const subject = parsed.subject || parsedHeader.subject?.[0] || '(Sin asunto)';
@@ -259,8 +243,6 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
           let textContent = '';
           if (typeof parsed.text === 'string') {
             textContent = parsed.text.trim();
-            
-            // Limpiar marcas de límite multipart que puedan aparecer en el texto
             textContent = textContent.replace(/--+[a-zA-Z0-9]+(--)?\r?\n/g, '');
             textContent = textContent.replace(/Content-Type:[^\n]+\r?\n/g, '');
             textContent = textContent.replace(/Content-Transfer-Encoding:[^\n]+\r?\n/g, '');
@@ -279,10 +261,7 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
             textContent = stripHtml(htmlContent);
           }
           
-          // Usar texto plano para almacenar
           const fullContent = textContent;
-          
-          // Generar vista previa
           const preview = textContent.substring(0, 150) + (textContent.length > 150 ? '...' : '');
           
           // Extraer adjuntos si existen
@@ -304,7 +283,7 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
             optimizedContent = fullContent.substring(0, 50000) + "... (contenido truncado para ahorro de memoria)";
           }
           
-          // Agregar correo detallado con fecha y contenido optimizado
+          // Agregar correo detallado
           detailedEmails.push({
             emailId,
             from: cleanEmailString(fromAddress),
@@ -316,17 +295,16 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
             attachments
           });
           
-          // Log para confirmar que tenemos contenido
-          console.log(`Procesado correo ${emailId} - Asunto: ${subject.substring(0, 30)}... - Contenido: ${fullContent ? fullContent.length : 0} caracteres`);
+          console.log(`✅ Procesado correo ${emailId} - ${subject.substring(0, 30)}... - ${fullContent.length} chars`);
+          
         } catch (error) {
           console.error(`Error al procesar correo ${emailId}:`, error);
           
-          // Intentar crear un email con la información básica del encabezado
+          // Fallback con información básica del encabezado
           const fallbackFrom = parsedHeader.from?.[0] || '';
           const fallbackTo = parsedHeader.to?.[0] || '';
           const fallbackSubject = parsedHeader.subject?.[0] || '(Sin asunto)';
           
-          // Intentar obtener fecha o usar fecha actual
           let fallbackDate = '';
           try {
             if (parsedHeader.date && parsedHeader.date[0]) {
@@ -347,6 +325,13 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
             preview: 'Error al procesar el contenido del correo'
           });
         }
+        
+        // Pequeña pausa entre correos para no sobrecargar
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+      } catch (emailError) {
+        console.error(`Error al procesar correo individual ${emailId}:`, emailError);
+        detailedEmails.push({ emailId });
       }
     }
   } finally {
