@@ -24,16 +24,43 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
-// Ruta para obtener estadísticas de sincronización
-app.get('/api/sync/status', (req: Request, res: Response) => {
-  const stats = syncManager.getStats();
-  res.json({
-    ...stats,
-    inProgress: syncManager.isSyncInProgress(),
-    startTimeFormatted: stats.startTime ? formatDate(stats.startTime) : null,
-    endTimeFormatted: stats.endTime ? formatDate(stats.endTime) : null,
-    lastUpdatedFormatted: formatDate(stats.lastUpdated)
-  });
+app.post('/api/sync/reset', (req, res) => {
+  try {
+    syncManager.forceReset();
+    res.json({ 
+      success: true, 
+      message: 'Estado de sincronización reseteado exitosamente',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error al resetear sincronización:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error interno del servidor',
+      message: error instanceof Error ? error.message : 'Error desconocido'
+    });
+  }
+});
+
+// Endpoint mejorado para obtener el estado
+app.get('/api/sync/status', (req, res) => {
+  try {
+    const stats = syncManager.getStats();
+    const isHanging = syncManager.isSyncInProgress() && stats.startTime && 
+                      (new Date().getTime() - stats.startTime.getTime()) > (8 * 60 * 1000); // 8 minutos
+    
+    res.json({
+      ...stats,
+      isHanging: isHanging,
+      canReset: syncManager.isSyncInProgress()
+    });
+  } catch (error) {
+    console.error('Error al obtener estado:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error interno del servidor' 
+    });
+  }
 });
 
 // Ruta para iniciar una sincronización manualmente
