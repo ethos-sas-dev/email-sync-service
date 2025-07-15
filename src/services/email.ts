@@ -62,42 +62,137 @@ export async function fetchEmailIds(): Promise<string[]> {
   console.log('Obteniendo IDs de correos desde el servidor IMAP...');
   
   const imapConfig = {
-    imap: getImapConfig()
+    imap: {
+      ...getImapConfig(),
+      // Aumentar timeouts de IMAP
+      authTimeout: 60000,   // 60 segundos para autenticación
+      connTimeout: 60000,   // 60 segundos para conexión
+      keepalive: {
+        interval: 30000,    // Ping cada 30 segundos
+        idleInterval: 300000, // 5 minutos
+        forceNoop: true
+      }
+    }
   };
   
+  let connection;
   try {
+    console.log('🔗 Iniciando conexión IMAP...');
+    const connectStart = Date.now();
+    
     // Conectar al servidor IMAP
-    const connection = await ImapClient.connect(imapConfig);
-    console.log('Conexión establecida con el servidor IMAP');
+    connection = await ImapClient.connect(imapConfig);
+    console.log(`✅ Conexión establecida en ${Date.now() - connectStart}ms`);
+    
+    console.log('📂 Abriendo bandeja INBOX...');
+    const openStart = Date.now();
     
     // Abrir bandeja de entrada
-    await connection.openBox('INBOX');
-    console.log('Bandeja INBOX abierta');
+    const box = await connection.openBox('INBOX');
+    console.log(`✅ Bandeja INBOX abierta en ${Date.now() - openStart}ms`);
+    console.log(`📊 Total de mensajes en INBOX: ${box.messages.total}`);
+    console.log(`📊 Mensajes nuevos: ${box.messages.new}`);
     
-    // Obtener solo los IDs de todos los correos
+    // Si hay demasiados correos, usar estrategia diferente
+    if (box.messages.total > 10000) {
+      console.log('⚠️  Bandeja grande detectada. Usando búsqueda optimizada...');
+      return await fetchEmailIdsOptimized(connection);
+    }
+    
+    console.log('🔍 Buscando todos los correos...');
+    const searchStart = Date.now();
+    
+    // Obtener solo los IDs de todos los correos (sin contenido)
     const searchCriteria = ['ALL'];
     const fetchOptions = {
-      bodies: ['HEADER.FIELDS (DATE FROM SUBJECT MESSAGE-ID)'],
-      struct: true
+      bodies: [], // No obtener contenido, solo metadatos
+      struct: false, // No necesitamos estructura
+      envelope: false // No necesitamos envelope
     };
     
     // Obtener los mensajes
     const messages = await connection.search(searchCriteria, fetchOptions);
-    console.log(`Encontrados ${messages.length} correos en el servidor`);
+    console.log(`✅ Búsqueda completada en ${Date.now() - searchStart}ms`);
+    console.log(`📊 Encontrados ${messages.length} correos en el servidor`);
     
     // Extraer solo los IDs
     const emailIds = messages.map((msg: Message) => String(msg.attributes.uid));
     
-    // Cerrar la conexión
-    await connection.end();
-    console.log('Conexión con servidor IMAP cerrada');
-    
     return emailIds;
   } catch (error) {
-    console.error('Error al obtener IDs de correos:', error);
+    console.error('❌ Error al obtener IDs de correos:', error);
+    
+    // Log adicional para diagnóstico
+    if (error instanceof Error) {
+      console.error('📄 Detalles del error:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack?.split('\n')[0] // Solo primera línea del stack
+      });
+    }
+    
     throw error;
+  } finally {
+    // Cerrar la conexión siempre
+    if (connection) {
+      try {
+        console.log('🔐 Cerrando conexión IMAP...');
+        await connection.end();
+        console.log('✅ Conexión IMAP cerrada correctamente');
+      } catch (closeError) {
+        console.error('⚠️  Error al cerrar conexión IMAP:', closeError);
+      }
+    }
   }
 }
+
+/**
+ * Estrategia optimizada para bandejas muy grandes
+ */
+async function fetchEmailIdsOptimized(connection: any): Promise<string[]> {
+  console.log('📈 Ejecutando estrategia optimizada para bandeja grande...');
+  
+  try {
+    // Obtener solo los correos de los últimos 30 días para empezar
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const searchCriteria = ['SINCE', thirtyDaysAgo];
+    const fetchOptions = {
+      bodies: [],
+      struct: false,
+      envelope: false
+    };
+    
+    console.log(`🗓️  Buscando correos desde ${thirtyDaysAgo.toISOString()}...`);
+    const recentMessages = await connection.search(searchCriteria, fetchOptions);
+    
+    console.log(`📊 Encontrados ${recentMessages.length} correos recientes`);
+    
+    // Si hay pocos correos recientes, obtener más
+    if (recentMessages.length < 100) {
+      console.log('📅 Ampliando búsqueda a últimos 90 días...');
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      
+      const extendedCriteria = ['SINCE', ninetyDaysAgo];
+      const extendedMessages = await connection.search(extendedCriteria, fetchOptions);
+      
+      console.log(`📊 Encontrados ${extendedMessages.length} correos en 90 días`);
+      return extendedMessages.map((msg: Message) => String(msg.attributes.uid));
+    }
+    
+    return recentMessages.map((msg: Message) => String(msg.attributes.uid));
+  } catch (error) {
+    console.error('❌ Error en estrategia optimizada:', error);
+    
+    // Fallback: obtener todos pero con timeout mayor
+    console.log('🔄 Fallback: intentando obtener todos los correos...');
+    const messages = await connection.search(['ALL'], { bodies: [], struct: false });
+    return messages.map((msg: Message) => String(msg.attributes.uid));
+  }
+}
+
 
 /**
  * Obtiene información detallada de correos por sus IDs (incluyendo cuerpo completo)
