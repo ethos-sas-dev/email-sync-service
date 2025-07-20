@@ -98,17 +98,24 @@ class SyncManager {
       // Obtener correos existentes desde Strapi
       const existingEmails = await this.executeWithTimeout(
         getEmailsFromStrapi(),
-        30000, // 30 segundos timeout para Strapi
+        60000, // 60 segundos timeout para Strapi (ahora puede paginar)
         'getEmailsFromStrapi'
       );
       const existingIds = new Set(existingEmails.map(email => email.emailId));
+
+      // Calcular la fecha más reciente de los correos ya guardados
+      const latestDate = existingEmails.reduce((max, email) => {
+        const d = new Date(email.receivedDate);
+        return d > max ? d : max;
+      }, new Date(0));
+      console.log(`Última fecha registrada en Strapi: ${latestDate.toISOString()}`);
       
       console.log(`Encontrados ${existingIds.size} correos existentes en Strapi`);
       
-      // Obtener todos los IDs de correos desde el servidor IMAP
+      // Obtener IDs de correos desde el servidor IMAP que sean posteriores a latestDate
       const allEmailIds = await this.executeWithTimeout(
-        fetchEmailIds(),
-        60000, // 60 segundos timeout para IMAP
+        fetchEmailIds(latestDate),
+        180000, // 3 minutos timeout para IMAP
         'fetchEmailIds'
       );
       console.log(`Encontrados ${allEmailIds.length} correos en el servidor IMAP`);

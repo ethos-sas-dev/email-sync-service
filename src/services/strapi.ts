@@ -15,73 +15,81 @@ export async function getEmailsFromStrapi(): Promise<EmailMetadata[]> {
     console.error('Error: URL de GraphQL o token de Strapi no están configurados');
     return [];
   }
-  
-  const query = `
-    query {
-      emailTrackings(pagination: { limit: 1000 }) {
-        documentId
-        emailId
-        emailStatus
-        from
-        to
-        subject
-        receivedDate
-        lastResponseBy
-        fullContent
-        publishedAt
-      }
-    }
-  `;
-  
+  const pageSize = 1000;
+  let start = 0;
+  const emails: EmailMetadata[] = [];
+
   try {
-    const response = await axios.post(
-      graphqlUrl,
-      { query },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiToken}`
+    while (true) {
+      // Construimos la consulta con paginación manual
+      const query = `
+        query {
+          emailTrackings(pagination: { start: ${start}, limit: ${pageSize} }) {
+            documentId
+            emailId
+            emailStatus
+            from
+            to
+            subject
+            receivedDate
+            lastResponseBy
+            fullContent
+          }
         }
+      `;
+
+      const response = await axios.post(
+        graphqlUrl,
+        { query },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiToken}`
+          }
+        }
+      );
+
+      if (response.data.errors) {
+        console.error('Error en la respuesta de GraphQL:', response.data.errors);
+        break;
       }
-    );
-    
-    if (response.data.errors) {
-      console.error('Error en la respuesta de GraphQL:', response.data.errors);
-      return [];
-    }
-    
-    if (!response.data.data?.emailTrackings) {
-      console.error('Estructura de datos inesperada en la respuesta de Strapi');
-      return [];
-    }
-    
-    // Mapear los emails desde el formato de Strapi
-    const emails: EmailMetadata[] = response.data.data.emailTrackings.map((track: any) => {
-      // Generar una vista previa del contenido si está disponible
-      let preview = "";
-      if (track.fullContent) {
-        preview = track.fullContent.substring(0, 100) + (track.fullContent.length > 100 ? "..." : "");
+
+      const batch = response.data.data?.emailTrackings;
+      if (!Array.isArray(batch) || batch.length === 0) {
+        // No quedan más registros que procesar
+        break;
       }
-      
-      return {
-        id: track.documentId,
-        emailId: track.emailId,
-        from: track.from || '',
-        to: track.to || '',
-        subject: track.subject || '',
-        receivedDate: track.receivedDate || new Date().toISOString(),
-        status: track.emailStatus as EmailStatus || 'necesitaAtencion',
-        lastResponseBy: track.lastResponseBy,
-        preview: preview,
-        fullContent: track.fullContent
-      };
-    });
-    
-    console.log(`Obtenidos ${emails.length} correos desde Strapi`);
+
+      // Mapear y añadir al arreglo total
+      batch.forEach((track: any) => {
+        let preview = "";
+        if (track.fullContent) {
+          preview = track.fullContent.substring(0, 100) + (track.fullContent.length > 100 ? "..." : "");
+        }
+
+        emails.push({
+          id: track.documentId,
+          emailId: track.emailId,
+          from: track.from || '',
+          to: track.to || '',
+          subject: track.subject || '',
+          receivedDate: track.receivedDate || new Date().toISOString(),
+          status: track.emailStatus as EmailStatus || 'necesitaAtencion',
+          lastResponseBy: track.lastResponseBy,
+          preview,
+          fullContent: track.fullContent
+        });
+      });
+
+      // Avanzar a la siguiente página
+      start += pageSize;
+    }
+
+    console.log(`Obtenidos ${emails.length} correos desde Strapi (paginado)`);
     return emails;
   } catch (error) {
-    console.error('Error al obtener correos desde Strapi:', error);
-    return [];
+    console.error('Error al obtener correos desde Strapi (paginado):', error);
+    return emails;
   }
 }
 

@@ -58,7 +58,7 @@ function parseHeader(headerText: string): Record<string, string[]> {
 /**
  * Obtiene los IDs de correos desde el servidor IMAP
  */
-export async function fetchEmailIds(): Promise<string[]> {
+export async function fetchEmailIds(sinceDate?: Date): Promise<string[]> {
   console.log('Obteniendo IDs de correos desde el servidor IMAP...');
   
   const imapConfig = {
@@ -96,14 +96,14 @@ export async function fetchEmailIds(): Promise<string[]> {
     // Si hay demasiados correos, usar estrategia diferente
     if (box.messages.total > 10000) {
       console.log('⚠️  Bandeja grande detectada. Usando búsqueda optimizada...');
-      return await fetchEmailIdsOptimized(connection);
+      return await fetchEmailIdsOptimized(connection, sinceDate);
     }
     
     console.log('🔍 Buscando todos los correos...');
     const searchStart = Date.now();
     
-    // Obtener solo los IDs de todos los correos (sin contenido)
-    const searchCriteria = ['ALL'];
+    // Obtener solo los IDs de los correos (sin contenido)
+    const searchCriteria = sinceDate ? ['SINCE', sinceDate] : ['ALL'];
     const fetchOptions = {
       bodies: [], // No obtener contenido, solo metadatos
       struct: false, // No necesitamos estructura
@@ -149,7 +149,16 @@ export async function fetchEmailIds(): Promise<string[]> {
 /**
  * Estrategia optimizada para bandejas muy grandes
  */
-async function fetchEmailIdsOptimized(connection: any): Promise<string[]> {
+async function fetchEmailIdsOptimized(connection: any, sinceDate?: Date): Promise<string[]> {
+  // Si tenemos fecha de referencia, no necesitamos estrategia compleja
+  if (sinceDate) {
+    console.log(`📅 Bandeja grande: buscando correos desde ${sinceDate.toISOString()}...`);
+    const searchCriteria = ['SINCE', sinceDate];
+    const fetchOptions = { bodies: [], struct: false, envelope: false };
+    const messages = await connection.search(searchCriteria, fetchOptions);
+    console.log(`📊 Encontrados ${messages.length} correos recientes`);
+    return messages.map((msg: Message) => String(msg.attributes.uid));
+  }
   console.log('📈 Ejecutando estrategia optimizada para bandeja grande...');
   
   try {
