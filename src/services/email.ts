@@ -103,7 +103,7 @@ export async function fetchEmailIds(sinceDate?: Date): Promise<string[]> {
     const searchStart = Date.now();
     
     // Obtener solo los IDs de los correos (sin contenido)
-    const searchCriteria = sinceDate ? ['SINCE', sinceDate] : ['ALL'];
+    const searchCriteria = sinceDate ? [['SINCE', sinceDate]] : ['ALL'];
     const fetchOptions = {
       bodies: [], // No obtener contenido, solo metadatos
       struct: false, // No necesitamos estructura
@@ -153,7 +153,7 @@ async function fetchEmailIdsOptimized(connection: any, sinceDate?: Date): Promis
   // Si tenemos fecha de referencia, no necesitamos estrategia compleja
   if (sinceDate) {
     console.log(`📅 Bandeja grande: buscando correos desde ${sinceDate.toISOString()}...`);
-    const searchCriteria = ['SINCE', sinceDate];
+    const searchCriteria = [['SINCE', sinceDate]];
     const fetchOptions = { bodies: [], struct: false, envelope: false };
     const messages = await connection.search(searchCriteria, fetchOptions);
     console.log(`📊 Encontrados ${messages.length} correos recientes`);
@@ -215,9 +215,13 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
   
   console.log(`Obteniendo contenido detallado para ${emailIds.length} correos`);
   
-  // Crear conexión IMAP
+  // Crear conexión IMAP con timeouts extendidos
   const imapConfig = {
-    imap: getImapConfig()
+    imap: {
+      ...getImapConfig(),
+      authTimeout: 60000,
+      connTimeout: 60000
+    }
   };
   
   let connection;
@@ -494,16 +498,12 @@ export async function fetchEmailContent(emailId: string): Promise<DetailedEmail 
     // Parsear el encabezado
     let parsedHeader: Record<string, string[]> = {};
     try {
-      // Asegurarnos que headerPart.body es un string antes de parsearlo
       const headerBody = typeof headerPart.body === 'string' 
         ? headerPart.body 
         : JSON.stringify(headerPart.body);
-      
-      // Usar nuestra propia función parseHeader
       parsedHeader = parseHeader(headerBody);
     } catch (headerError) {
       console.error(`Error al parsear encabezado del correo ${emailId}:`, headerError);
-      // No es crítico, continuamos
     }
     
     // Obtener el cuerpo completo
@@ -516,66 +516,44 @@ export async function fetchEmailContent(emailId: string): Promise<DetailedEmail 
     // Parsear el correo completo
     const parsed = await simpleParser(fullPart.body);
     
-    // Extraer información segura del correo usando la misma función auxiliar
+    // Función auxiliar para extraer emails seguros
     const getEmailAddress = (addressObj: any): string => {
       if (!addressObj) return '';
-      
       try {
-        // Intentar diferentes formatos de direcciones de correo
         if (typeof addressObj === 'string') return addressObj;
-        
-        // Si tiene texto, usarlo directamente
         if (addressObj.text) return addressObj.text;
-        
-        // Si tiene dirección, usarla
         if (addressObj.address) return addressObj.address;
-        
-        // Si tiene un array value, obtener la primera dirección
         if (addressObj.value && Array.isArray(addressObj.value) && addressObj.value.length > 0) {
           return addressObj.value[0].address || '';
         }
-        
-        // Si es un array, tomar el primer elemento
         if (Array.isArray(addressObj) && addressObj.length > 0) {
           const first = addressObj[0];
-          return typeof first === 'string' ? first : 
-                 first.address || first.text || '';
+          return typeof first === 'string' ? first : first.address || first.text || '';
         }
-        
-        // Último recurso: convertir a string
         return String(addressObj);
-      } catch (e) {
-        // Si hay error, devolver cadena vacía
+      } catch (_) {
         return '';
       }
     };
     
-    // Extraer direcciones
     const fromAddress = getEmailAddress(parsed.from);
     const toAddress = getEmailAddress(parsed.to);
     
-    // Obtener texto plano
     let textContent = typeof parsed.text === 'string' ? parsed.text.trim() : '';
-    
-    // Si no hay texto plano pero hay HTML, convertir HTML a texto
     if (!textContent && typeof parsed.html === 'string') {
       textContent = stripHtml(parsed.html);
     }
     
-    // Crear la vista previa
     const preview = textContent.substring(0, 150) + (textContent.length > 150 ? '...' : '');
     
-    // Extraer adjuntos
     const attachments = parsed.attachments?.map(att => ({
       filename: att.filename || 'adjunto.bin',
       contentType: att.contentType || 'application/octet-stream',
       size: att.size || 0
     }));
     
-    // Extraer información segura del correo
     let subject = parsed.subject || '(Sin asunto)';
     
-    // Obtener la fecha del correo
     let receivedDate = '';
     try {
       if (parsed.date) {
@@ -585,11 +563,10 @@ export async function fetchEmailContent(emailId: string): Promise<DetailedEmail 
       } else {
         receivedDate = new Date().toISOString();
       }
-    } catch (error) {
+    } catch (_) {
       receivedDate = new Date().toISOString();
     }
     
-    // Cerrar la conexión
     await connection.end();
     
     return {
@@ -614,4 +591,4 @@ export async function fetchEmailContent(emailId: string): Promise<DetailedEmail 
       }
     }
   }
-} 
+}

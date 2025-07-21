@@ -98,10 +98,25 @@ class SyncManager {
       // Obtener correos existentes desde Strapi
       const existingEmails = await this.executeWithTimeout(
         getEmailsFromStrapi(),
-        60000, // 60 segundos timeout para Strapi (ahora puede paginar)
+        60000,
         'getEmailsFromStrapi'
       );
-      const existingIds = new Set(existingEmails.map(email => email.emailId));
+
+      // Detectar correos con contenido incompleto para reintentar
+      const placeholderEmails = existingEmails.filter(email => {
+        if (!email.fullContent) return true;
+        const c = email.fullContent.trim();
+        return c.length === 0 || c.startsWith('(Contenido no disponible') || c.startsWith('Error al procesar');
+      });
+
+      const placeholderIds = placeholderEmails.map(e => e.emailId);
+
+      // Excluirlos del set de existentes completos
+      const existingIds = new Set(
+        existingEmails
+          .filter(email => !placeholderIds.includes(email.emailId))
+          .map(email => email.emailId)
+      );
 
       // Calcular la fecha más reciente de los correos ya guardados
       const latestDate = existingEmails.reduce((max, email) => {
@@ -120,8 +135,13 @@ class SyncManager {
       );
       console.log(`Encontrados ${allEmailIds.length} correos en el servidor IMAP`);
       
-      // Filtrar solo los IDs que no existen en Strapi
+      // Filtrar solo los IDs que no existen en Strapi o están incompletos
       const newEmailIds = allEmailIds.filter(id => !existingIds.has(id));
+
+      // Añadir explícitamente los incompletos (sin duplicar)
+      placeholderIds.forEach(id => {
+        if (!newEmailIds.includes(id)) newEmailIds.push(id);
+      });
       console.log(`Detectados ${newEmailIds.length} correos nuevos para sincronizar`);
       
       // Actualizar estadísticas
@@ -147,10 +167,11 @@ class SyncManager {
         try {
           console.log(`Procesando lote ${Math.floor(i/batchSize) + 1} de ${Math.ceil(newEmailIds.length/batchSize)}`);
           
-          // Obtener detalles de los correos con timeout
+          // Timeout dinámico: 1 minuto por correo en el lote, mínimo 2 min
+          const batchTimeout = Math.max(120000, batch.length * 60000);
           const detailedEmails = await this.executeWithTimeout(
             fetchDetailedEmails(batch),
-            120000, // 2 minutos timeout por lote
+            batchTimeout,
             `fetchDetailedEmails batch ${Math.floor(i/batchSize) + 1}`
           );
           

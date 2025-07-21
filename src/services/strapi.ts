@@ -106,108 +106,81 @@ export async function syncEmailWithStrapi(
   }
   
   try {
-    const { graphqlUrl, apiToken } = getStrapiConfig();
-    
-    if (!graphqlUrl || !apiToken) {
-      console.error('Error: URL de GraphQL o token de Strapi no están configurados');
+    const baseUrl = process.env.STRAPI_REST_URL || process.env.GRAPHQL_URL?.replace('/graphql','');
+    const { apiToken } = getStrapiConfig();
+    if (!baseUrl || !apiToken) {
+      console.error('Error: URL de Strapi o token no configurados');
       return null;
     }
-    
-    // Verificar si el correo ya existe
-    const checkQuery = `
-      query {
-        emailTrackings(filters: { emailId: { eq: "${String(email.emailId)}" } }) {
-          documentId
-          emailId
-          emailStatus
-          lastResponseBy
-        }
+    // 1) Verificar si existe por REST
+    const checkUrl = `${baseUrl}/api/email-trackings?filters[emailId][$eq]=${encodeURIComponent(String(email.emailId))}`;
+    const checkResponse = await axios.get(checkUrl, {
+      headers: { Authorization: `Bearer ${apiToken}` }
+    });
+    const found = Array.isArray(checkResponse.data?.data) && checkResponse.data.data.length > 0;
+     
+    if (found) {
+      const existing = checkResponse.data.data[0];
+      const existingId = existing.documentId || existing.id;
+      // Si el contenido es nulo o placeholder, actualizamos
+      const existingContent = existing.attributes?.fullContent || '';
+      const needsUpdate = !existingContent || existingContent.startsWith('(Contenido no disponible') || existingContent.startsWith('Error al procesar');
+ 
+      if (!needsUpdate) {
+        // Ya está completo; no hacer nada
+        return existingId;
       }
-    `;
-    
-    const checkResponse = await axios.post(
-      graphqlUrl,
-      { query: checkQuery },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiToken}`
-        }
+ 
+      // Limitar tamaño del contenido (10k)
+      let updateContent = email.fullContent || email.preview || '(Contenido no disponible)';
+      if (typeof updateContent === 'string' && updateContent.length > 10000) {
+        updateContent = updateContent.substring(0, 10000) + '... (contenido truncado)';
       }
-    );
-    
-    if (checkResponse.data.errors) {
-      console.error('Error al verificar correo en Strapi:', checkResponse.data.errors);
-      return null;
-    }
-    
-    const exists = checkResponse.data.data?.emailTrackings && 
-                  checkResponse.data.data.emailTrackings.length > 0;
-    
-    if (exists) {
-      // El correo ya existe, devolver su ID
-      return checkResponse.data.data.emailTrackings[0].documentId;
+
+      const updateUrl = `${baseUrl}/api/email-trackings/${existingId}`;
+      await axios.put(updateUrl, {
+        data: {
+          from: email.from || '',
+          to: email.to || '',
+          subject: email.subject || '',
+          receivedDate: email.receivedDate || new Date().toISOString(),
+          fullContent: updateContent,
+          emailStatus: mapToStrapiStatus(status),
+          lastResponseBy: null
+        }
+      }, { headers: { Authorization: `Bearer ${apiToken}` } });
+
+      console.log(`Correo ${email.emailId} actualizado con contenido completo`);
+      return existingId;
     }
     
     // El correo no existe, crear uno nuevo
     const strapiStatus = mapToStrapiStatus(status);
     
-    const createMutation = `
-      mutation CreateEmail($data: EmailTrackingInput!) {
-        createEmailTracking(
-          data: $data
-        ) {
-          documentId
-          emailId
-          emailStatus
-        }
-      }
-    `;
-    
-    const createVariables = {
-      data: {
-        emailId: String(email.emailId),
-        from: escapeForGraphQL(email.from || ''),
-        to: escapeForGraphQL(email.to || ''),
-        subject: escapeForGraphQL(email.subject || ''),
-        receivedDate: email.receivedDate || new Date().toISOString(),
-        emailStatus: strapiStatus,
-        // Limitar el tamaño del contenido para evitar problemas de memoria
-        // Si el contenido es demasiado grande, lo recortamos a 50K caracteres para reducir consumo
-        fullContent: escapeForGraphQL(
-          typeof email.fullContent === 'string' && email.fullContent.trim() 
-            ? email.fullContent.length > 50000 
-              ? email.fullContent.trim().substring(0, 50000) + '... (contenido truncado para ahorrar memoria)'
-              : email.fullContent.trim() 
-            : email.preview || '(Contenido no disponible)'
-        ),
-        lastResponseBy: null
-      }
-    };
-    
-    // Log para depurar (mostrar si tenemos contenido)
-    console.log(`Guardando correo ${email.emailId} - Longitud del contenido: ${(email.fullContent || '').length} caracteres`);
-    
-    const createResponse = await axios.post(
-      graphqlUrl,
-      { 
-        query: createMutation,
-        variables: createVariables
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiToken}`
-        }
-      }
-    );
-    
-    if (createResponse.data.errors) {
-      console.error('Error al crear correo en Strapi:', createResponse.data.errors);
-      return null;
+    const createUrl = `${baseUrl}/api/email-trackings`;
+
+    // Limitar contenido
+    let content = email.fullContent || email.preview || '(Contenido no disponible)';
+    if (typeof content === 'string' && content.length > 10000) {
+      content = content.substring(0, 10000) + '... (contenido truncado)';
     }
-    
-    const newId = createResponse.data.data?.createEmailTracking?.documentId;
+
+    const payload = {
+      emailId: String(email.emailId),
+      from: email.from || '',
+      to: email.to || '',
+      subject: email.subject || '',
+      receivedDate: email.receivedDate || new Date().toISOString(),
+      emailStatus: strapiStatus,
+      fullContent: content,
+      lastResponseBy: null
+    };
+
+    console.log(`Guardando correo ${email.emailId} - contenido ${content.length} chars`);
+
+    const createResp = await axios.post(createUrl, { data: payload }, { headers: { Authorization: `Bearer ${apiToken}` } });
+
+    const newId = createResp.data?.data?.documentId || createResp.data?.data?.id;
     
     if (newId) {
       console.log(`Correo ${email.emailId} creado en Strapi con ID: ${newId}`);
