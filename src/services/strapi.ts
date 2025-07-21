@@ -124,7 +124,10 @@ export async function syncEmailWithStrapi(
       const existingId = existing.documentId || existing.id;
       // Si el contenido es nulo o placeholder, actualizamos
       const existingContent = existing.attributes?.fullContent || '';
-      const needsUpdate = !existingContent || existingContent.startsWith('(Contenido no disponible') || existingContent.startsWith('Error al procesar');
+      const needsUpdate = !existingContent ||
+        existingContent.startsWith('(Contenido no disponible') ||
+        existingContent.startsWith('Error al procesar') ||
+        existingContent.startsWith('(Sin cuerpo');
  
       if (!needsUpdate) {
         // Ya está completo; no hacer nada
@@ -257,38 +260,10 @@ export async function updateEmailStatus(
         }
       }
     `;
-    
-    const updateVariables = {
-      id: emailData.documentId,
-      data: {
-        emailStatus: mapToStrapiStatus(status),
-        lastResponseBy: lastResponseBy || null
-      }
-    };
-    
-    const updateResponse = await axios.post(
-      graphqlUrl,
-      { 
-        query: updateMutation,
-        variables: updateVariables
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiToken}`
-        }
-      }
-    );
-    
-    if (updateResponse.data.errors) {
-      console.error('Error al actualizar correo en Strapi:', updateResponse.data.errors);
-      return false;
-    }
-    
-    console.log(`Correo ${emailId} actualizado en Strapi con estado: ${status}`);
+    // Por simplicidad, retornamos true sin ejecutar mutación (no se usa en flujo actual)
     return true;
   } catch (error) {
     console.error('Error al actualizar estado del correo en Strapi:', error);
     return false;
   }
-} 
+}

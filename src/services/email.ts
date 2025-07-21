@@ -253,8 +253,8 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
         const messages = await connection.search(searchCriteria, fetchOptions);
         
         if (!messages || messages.length === 0) {
-          console.log(`No se encontró el correo con ID ${emailId}`);
-          detailedEmails.push({ emailId });
+          console.log(`UID ${emailId} no existe (correo eliminado o movido). Se ignora.`);
+          // No agregamos este correo, así no se intentará guardar
           continue;
         }
         
@@ -367,6 +367,11 @@ export async function fetchDetailedEmails(emailIds: string[]): Promise<DetailedE
           // Generar texto plano a partir del HTML como último recurso
           if (!textContent && htmlContent) {
             textContent = stripHtml(htmlContent);
+          }
+
+          // Si aún está vacío, marcarlo explícitamente
+          if (!textContent) {
+            textContent = '(Sin cuerpo: sólo adjuntos o invitación de calendario)';
           }
           
           const fullContent = textContent;
